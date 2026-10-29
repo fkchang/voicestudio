@@ -1,0 +1,27 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Self-documenting demo of every --effect preset: each clip announces its preset, then speaks the
+# same sentence with the same seed, so the clips differ only in the effect.
+# usage: effects-demo OUT_DIR [--voice NAME]   then: play-manifest OUT_DIR
+require 'json'
+require 'fileutils'
+
+dir = ARGV.fetch(0) { abort 'usage: effects-demo OUT_DIR [--voice NAME]' }
+voice = ARGV[1] == '--voice' ? ARGV[2] : nil
+speak = File.expand_path('../bin/speak', __dir__)
+FileUtils.mkdir_p(dir)
+
+effects = %w[broadcast cinematic podcast raw warm bright]
+sentence = 'I would like to talk to you about my problem. It has been on my mind for a while.'
+segments = effects.each_with_index.map do |effect, i|
+  text = "Effect: #{effect}. #{sentence}"
+  file = File.expand_path(File.join(dir, format('%02d-%s.wav', i + 1, effect)))
+  cmd = [speak, text, '--effect', effect, '--seed', '7', '--out', file]
+  cmd += ['--voice', voice] if voice
+  system(*cmd, out: File::NULL) || abort("speak failed for #{effect}")
+  warn "rendered #{effect}"
+  { 'index' => i + 1, 'text' => text, 'file' => file }
+end
+File.write(File.join(dir, 'manifest.json'), JSON.pretty_generate('segments' => segments))
+puts File.expand_path(dir)
