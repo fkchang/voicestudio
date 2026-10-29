@@ -1,0 +1,33 @@
+Markup demo. Each clip names the tag, then uses it. Listen for the difference.
+
+Pause, short. Before. [pause 300ms] After the three hundred millisecond pause.
+
+Pause, long. Before. [pause 800ms] After the eight hundred millisecond pause.
+
+Sigh. Before. [sigh] After the sigh.
+
+Laughter. Before. [laughter] After the laughter.
+
+Surprise, oh. Before. [surprise-oh] After surprise oh.
+
+Surprise, ah. Before. [surprise-ah] After surprise ah.
+
+Surprise, wa. Before. [surprise-wa] After surprise wa.
+
+Surprise, yo. Before. [surprise-yo] After surprise yo.
+
+Question, en. Before. [question-en] After question en.
+
+Question, ah. Before. [question-ah] After question ah.
+
+Question, oh. Before. [question-oh] After question oh.
+
+Confirmation, en. Before. [confirmation-en] After confirmation en.
+
+Dissatisfaction, hnn. Before. [dissatisfaction-hnn] After dissatisfaction hnn.
+
+Respelling. Normally: Nevada. With respelling: [[Nuh-VAD-uh]]. Done.
+
+In a sentence. I would like to talk to you about, um, [pause 500ms] [sigh] my problem.
+
+End of demo.

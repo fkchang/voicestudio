@@ -1,0 +1,12 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Play every segment of a `speak --batch` manifest in order, printing each line's text first.
+# usage: play-manifest DIR_OR_manifest.json
+require 'json'
+path = ARGV.fetch(0) { abort 'usage: play-manifest DIR_OR_manifest.json' }
+path = File.join(path, 'manifest.json') if File.directory?(path)
+JSON.parse(File.read(path)).fetch('segments').each do |s|
+  puts format('%02d  %s', s['index'], s['text'])
+  system('afplay', s['file'])
+end
