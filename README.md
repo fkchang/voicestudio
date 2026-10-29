@@ -96,6 +96,9 @@ speak --file script.txt [--out FILE.wav]
 speak --batch script.txt --out-dir DIR
 speak voices [--all]
       --speed N   --language L   --engine voicestudio|say   --json
+      --effect broadcast|cinematic|podcast|raw|warm|bright
+      --seed N   --temperature N   --guidance N   --gain DB
+      --instruct "whisper"   (voice attributes only: gender, age, pitch, accent, whisper)
 ```
 
 Exit codes: `1` usage, `2` synth failed, `3` unknown voice, `4` no engine.

@@ -20,6 +20,22 @@ $SPEAK "Hi" --json --out hi.wav                 # {"file","seconds","engine","vo
 $SPEAK --batch script.txt --out-dir seg/        # paragraphs (blank-line separated) -> seg/seg-001.wav ... + seg/manifest.json
 ```
 
+## Delivery controls (all optional, VoiceStudio voices only; the `say` fallback ignores them except `--gain`)
+
+```bash
+$SPEAK "text" --speed 0.85 --out a.wav          # 0.8 slower ... 1.3 faster; default 1.0
+$SPEAK "text" --effect warm --out a.wav         # broadcast (default), cinematic, podcast, raw, warm, bright (EQ, compression, reverb)
+$SPEAK "text" --seed 7 --out a.wav              # same text + seed = identical audio; change the seed for a different take
+$SPEAK "text" --temperature 0.3 --out a.wav     # delivery variation: lower steadier, higher more varied
+$SPEAK "text" --guidance 3 --out a.wav          # how strongly the clone is steered (default 2.0)
+$SPEAK "text" --instruct "whisper" --out a.wav  # voice attributes ONLY (see below), not free text like "calm"
+$SPEAK "text" --gain -3 --out a.wav             # volume in dB; auto-limited so it never clips
+```
+
+`--instruct` accepts only comma+space separated items from: american accent, australian accent, british accent, canadian accent, child, chinese accent, elderly, female, high pitch, indian accent, japanese accent, korean accent, low pitch, male, middle-aged, moderate pitch, portuguese accent, russian accent, teenager, very high pitch, very low pitch, whisper, young adult. Anything else exits 2 with the server's message. Pace and emotion are NOT instruct items: use `--speed`, `--temperature` and `--seed`.
+`--effect raw` plus `--gain` gives a plain, level-controlled clip. `--effect` changes loudness and tone indirectly (raw measured about 3x quieter than warm on the same text).
+Seed and gain were verified; `--temperature`, `--guidance` and `--effect` are passed through and untested for audible quality: audition before relying on them.
+
 `manifest.json` has `total_seconds` and per segment `index, file, text, start, end, duration, engine, voice`: use `start`/`end` to place slides or cut video. Output is 24 kHz mono 16-bit WAV.
 
 ## Behavior to know

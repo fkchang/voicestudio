@@ -16,5 +16,7 @@ $SPEAK --file script.txt --out narration.wav
 $SPEAK --batch script.txt --out-dir seg/       # blank-line paragraphs -> seg-NNN.wav + manifest.json (start/end seconds)
 ```
 
+Delivery (optional): `--speed 0.85`, `--effect raw|warm|bright|podcast|cinematic|broadcast`, `--seed N` (repeatable take), `--temperature N`, `--guidance N`, `--gain -3` (dB, never clips), `--instruct whisper` (voice attributes only, not free text). Details in the guide.
+
 Rules: ~5 s compute per 1 s audio, so batch; first call may launch the app (wait up to 90 s). Use `--json` and check `engine` (`voicestudio` = cloned voice, `say` = fallback, tell the user). Never record or upload voice samples; never clone anyone without their consent. Local only, no keys.
 For spoken notifications use `utts` instead (fast, play-only).

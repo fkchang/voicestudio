@@ -76,12 +76,37 @@ def wav_seconds(path)
   (bytes.to_f / (rate * 2)).round(3)
 end
 
+# Scale a 16-bit PCM WAV by `db` decibels in place. Reduces the gain if it would clip.
+def apply_gain(path, db)
+  bin = File.binread(path)
+  at = bin.index('data') or die('gain: no data chunk in wav', 2)
+  start = at + 8
+  samples = bin[start..-1].unpack('s<*')
+  peak = samples.map(&:abs).max.to_f
+  return if peak.zero?
+  factor = 10**(db / 20.0)
+  if peak * factor > 32767
+    factor = 32767 / peak
+    warn format('speak: --gain %+.1f dB would clip; limited to %+.1f dB', db, 20 * Math.log10(factor))
+  end
+  File.binwrite(path, bin[0, start] + samples.map { |v| (v * factor).round.clamp(-32768, 32767) }.pack('s<*'))
+end
+
 def via_voicestudio(text, profile, out, opts)
   cmd = ['curl', '-sS', '--fail-with-body', '-m', '900', '-X', 'POST', "#{BASE}/generate",
          '-F', "text=#{text}", '-F', "profile_id=#{profile['id']}", '-F', "speed=#{opts[:speed]}", '-o', out]
   cmd += ['-F', "language=#{opts[:language]}"] if opts[:language]
+  { effect: 'effect_preset', instruct: 'instruct', seed: 'seed', pos_temp: 'position_temperature',
+    class_temp: 'class_temperature', guidance: 'guidance_scale' }.each do |key, field|
+    cmd += ['-F', "#{field}=#{opts[key]}"] unless opts[key].nil?
+  end
   _o, e, st = Open3.capture3(*cmd)
-  die("VoiceStudio generate failed: #{e.strip[0, 300]}", 2) unless st.success?
+  unless st.success?
+    body = File.exist?(out) ? File.binread(out)[0, 2000].to_s.force_encoding('UTF-8') : ''
+    File.delete(out) if File.exist?(out)
+    detail = begin JSON.parse(body)['detail'] rescue body end.to_s.lines.first(2).join.strip
+    die("VoiceStudio generate failed: #{detail.empty? ? e.strip[0, 300] : detail[0, 400]}", 2)
+  end
 end
 
 def via_say(text, voice, out)
@@ -92,8 +117,14 @@ def via_say(text, voice, out)
   end
 end
 
-# Returns [engine, wav_path]. voice nil => config default_voice.
+# Returns [engine, voice name]. voice nil => config default_voice.
 def synth(text, voice, out, opts)
+  result = synth_raw(text, voice, out, opts)
+  apply_gain(out, opts[:gain]) if opts[:gain]
+  result
+end
+
+def synth_raw(text, voice, out, opts)
   explicit = !voice.nil?
   voice ||= config['default_voice'] || 'me'
   engine = opts[:engine]
@@ -139,6 +170,12 @@ OptionParser.new do |o|
   o.on('--play', 'also play the result (afplay)') { play = true }
   o.on('--speed N', Float, 'speaking speed, default 1.0') { |v| opts[:speed] = v }
   o.on('--language L', 'language hint, default Auto') { |v| opts[:language] = v }
+  o.on('--effect NAME', 'tone preset: broadcast (default), cinematic, podcast, raw, warm, bright') { |v| opts[:effect] = v }
+  o.on('--instruct TEXT', 'voice attributes only, comma+space separated: whisper, male, female, child, teenager, young adult, middle-aged, elderly, low/high pitch, british/american/australian/... accent') { |v| opts[:instruct] = v }
+  o.on('--seed N', Integer, 'repeat the same delivery for the same text') { |v| opts[:seed] = v }
+  o.on('--temperature N', Float, 'delivery variation (sets position and class temperature)') { |v| opts[:pos_temp] = opts[:class_temp] = v }
+  o.on('--guidance N', Float, 'how strongly the clone voice is steered, default 2.0') { |v| opts[:guidance] = v }
+  o.on('--gain DB', Float, 'volume change in dB, e.g. -3 or +6 (limited so it cannot clip)') { |v| opts[:gain] = v }
   o.on('--engine E', %w[voicestudio say], 'force voicestudio or say (default: voicestudio, falls back to say)') { |v| opts[:engine] = v }
   o.on('--all', 'with voices: also list macOS say voices') { opts[:all] = true }
   o.on('--json', 'print result as JSON') { opts[:json] = true }
