@@ -1,0 +1,7 @@
+{
+  "default_voice": "me",
+  "aliases": {
+    "me": "<name of your clone profile in VoiceStudio>",
+    "narrator": "<any other profile name>"
+  }
+}

@@ -1,0 +1,189 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# speak: one front door for TTS, in your own cloned voice or any VoiceStudio profile.
+# Engine: local VoiceStudio.app API (default 127.0.0.1:3900). Fallback: macOS `say`.
+# Stdlib only; written to run on macOS system ruby (2.6) as well as rvm ruby.
+
+require 'json'
+require 'net/http'
+require 'open3'
+require 'optparse'
+require 'fileutils'
+require 'tmpdir'
+
+BASE = ENV.fetch('VOICESTUDIO_URL', 'http://127.0.0.1:3900')
+CONFIG = ENV['VOICESTUDIO_CONFIG'] ||
+         File.join(ENV.fetch('XDG_CONFIG_HOME', File.join(Dir.home, '.config')), 'voicestudio', 'config.json')
+# Personal prefs, kept outside the repo (see config.example.json):
+#   {"default_voice":"me","aliases":{"me":"<your profile name>"}}
+
+def config
+  JSON.parse(File.read(CONFIG))
+rescue Errno::ENOENT, JSON::ParserError
+  {}
+end
+
+def die(msg, code = 1)
+  warn "speak: #{msg}"
+  exit code
+end
+
+def http_get(path, timeout = 5)
+  uri = URI("#{BASE}#{path}")
+  Net::HTTP.start(uri.host, uri.port, open_timeout: 2, read_timeout: timeout) { |h| h.get(uri.request_uri) }
+end
+
+def app_up?
+  http_get('/health', 2).code == '200'
+rescue StandardError
+  false
+end
+
+# Launch VoiceStudio.app if it is not serving; wait up to 90s.
+def ensure_app
+  return true if app_up?
+  return false unless File.exist?('/Applications/VoiceStudio.app')
+  warn 'speak: starting VoiceStudio.app...'
+  system('open', '-g', '-a', 'VoiceStudio')
+  45.times do
+    sleep 2
+    return true if app_up?
+  end
+  false
+end
+
+def profiles
+  JSON.parse(http_get('/profiles').body)
+end
+
+# Resolve a voice name to a VoiceStudio profile via alias, exact name, then id.
+def find_profile(name, list)
+  name = config.fetch('aliases', {}).fetch(name.downcase, name)
+  list.find { |p| p['name'].casecmp(name).zero? } || list.find { |p| p['id'] == name } ||
+    list.find { |p| p['name'].downcase.start_with?(name.downcase) }
+end
+
+def say_voices
+  out, = Open3.capture2('say', '-v', '?')
+  out.lines.map { |l| l.split(/\s{2,}/).first.to_s.strip }.reject(&:empty?)
+end
+
+def wav_seconds(path)
+  d = File.binread(path, 44)
+  rate = d[24, 4].unpack('V').first
+  bytes = File.size(path) - 44
+  (bytes.to_f / (rate * 2)).round(3)
+end
+
+def via_voicestudio(text, profile, out, opts)
+  cmd = ['curl', '-sS', '--fail-with-body', '-m', '900', '-X', 'POST', "#{BASE}/generate",
+         '-F', "text=#{text}", '-F', "profile_id=#{profile['id']}", '-F', "speed=#{opts[:speed]}", '-o', out]
+  cmd += ['-F', "language=#{opts[:language]}"] if opts[:language]
+  _o, e, st = Open3.capture3(*cmd)
+  die("VoiceStudio generate failed: #{e.strip[0, 300]}", 2) unless st.success?
+end
+
+def via_say(text, voice, out)
+  Dir.mktmpdir do |d|
+    aiff = File.join(d, 'x.aiff')
+    system('/usr/bin/say', '-v', voice, '-o', aiff, text) || die("say failed for voice #{voice}", 2)
+    system('/usr/bin/afconvert', '-f', 'WAVE', '-d', 'LEI16@24000', aiff, out) || die('afconvert failed', 2)
+  end
+end
+
+# Returns [engine, wav_path]. voice nil => config default_voice.
+def synth(text, voice, out, opts)
+  explicit = !voice.nil?
+  voice ||= config['default_voice'] || 'me'
+  engine = opts[:engine]
+  if engine != 'say' && ensure_app
+    prof = find_profile(voice, profiles)
+    if prof
+      via_voicestudio(text, prof, out, opts)
+      return ['voicestudio', prof['name']]
+    end
+    unless say_voices.include?(voice) || engine == 'voicestudio' || !explicit
+      die("no VoiceStudio profile '#{voice}'. Try: speak voices", 3)
+    end
+  elsif engine == 'voicestudio'
+    die('VoiceStudio.app is not running and could not be started', 4)
+  end
+  voice = 'Samantha' unless explicit && say_voices.include?(voice) # honest fallback, said on stderr
+  warn "speak: using macOS say (#{voice}), not the cloned voice" 
+  via_say(text, voice, out)
+  ['say', voice]
+end
+
+def split_segments(text)
+  text.split(/\n\s*\n/).map { |s| s.gsub(/\s+/, ' ').strip }.reject(&:empty?)
+end
+
+opts = { speed: 1.0 }
+play = false
+file = batch = out = outdir = voice = nil
+list = false
+OptionParser.new do |o|
+  o.banner = <<~B
+    Usage: speak "text" [--voice NAME] [--out FILE.wav] [--play]
+           speak --file script.txt [--out FILE.wav]
+           speak --batch script.txt --out-dir DIR      (paragraph = segment; writes DIR/manifest.json)
+           speak voices                                 (list voices, one per line)
+    Default voice: config default_voice (alias 'me'). Exit codes: 1 usage, 2 synth failed, 3 unknown voice, 4 no engine.
+  B
+  o.on('--voice NAME', 'profile name, id, alias or name prefix (see: speak voices)') { |v| voice = v }
+  o.on('--out FILE', 'output WAV path (default: temp file; the path is printed)') { |v| out = v }
+  o.on('--out-dir DIR', 'with --batch: directory for seg-NNN.wav and manifest.json') { |v| outdir = v }
+  o.on('--file FILE', 'speak the text in FILE as one clip') { |v| file = v }
+  o.on('--batch FILE', 'blank-line separated paragraphs, one WAV each, with timings') { |v| batch = v }
+  o.on('--play', 'also play the result (afplay)') { play = true }
+  o.on('--speed N', Float, 'speaking speed, default 1.0') { |v| opts[:speed] = v }
+  o.on('--language L', 'language hint, default Auto') { |v| opts[:language] = v }
+  o.on('--engine E', %w[voicestudio say], 'force voicestudio or say (default: voicestudio, falls back to say)') { |v| opts[:engine] = v }
+  o.on('--all', 'with voices: also list macOS say voices') { opts[:all] = true }
+  o.on('--json', 'print result as JSON') { opts[:json] = true }
+  o.on('-h', '--help') { puts o; exit 0 }
+end.parse!(ARGV)
+
+if ARGV.first == 'voices'
+  if ensure_app
+    cfg = config
+    profiles.each { |p| puts "#{p['name']}\t#{p['kind']}\t(voicestudio profile)" }
+    cfg.fetch('aliases', {}).each { |a, t| puts "#{a}\t-> #{t}\t(alias)" }
+  end
+  say_voices.each { |v| puts "#{v}\t(macOS say)" } if opts[:all]
+  exit 0
+end
+
+if batch
+  die('--batch needs --out-dir', 1) unless outdir
+  FileUtils.mkdir_p(outdir)
+  t = 0.0
+  segs = split_segments(File.read(batch)).each_with_index.map do |text, i|
+    path = File.join(outdir, format('seg-%03d.wav', i + 1))
+    engine, v = synth(text, voice, path, opts)
+    dur = wav_seconds(path)
+    seg = { 'index' => i + 1, 'file' => File.expand_path(path), 'text' => text, 'start' => t.round(3),
+            'duration' => dur, 'end' => (t + dur).round(3), 'engine' => engine, 'voice' => v }
+    t += dur
+    warn "speak: seg #{i + 1} #{dur}s"
+    seg
+  end
+  man = File.join(outdir, 'manifest.json')
+  File.write(man, JSON.pretty_generate('total_seconds' => t.round(3), 'segments' => segs))
+  puts File.expand_path(man)
+  exit 0
+end
+
+text = file ? File.read(file).gsub(/\s+/, ' ').strip : ARGV.join(' ').strip
+die('no text. See speak --help', 1) if text.empty?
+out ||= File.join(Dir.tmpdir, "speak-#{Time.now.strftime('%H%M%S')}-#{$$}.wav")
+FileUtils.mkdir_p(File.dirname(File.expand_path(out)))
+engine, v = synth(text, voice, out, opts)
+dur = wav_seconds(out)
+system('afplay', out) if play
+if opts[:json]
+  puts JSON.generate('file' => File.expand_path(out), 'seconds' => dur, 'engine' => engine, 'voice' => v)
+else
+  puts File.expand_path(out)
+end

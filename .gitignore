@@ -1,0 +1,4 @@
+config.json
+config.local.json
+*.wav
+.registry/
