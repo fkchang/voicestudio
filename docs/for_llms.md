@@ -36,6 +36,10 @@ $SPEAK "text" --gain -3 --out a.wav             # volume in dB; auto-limited so 
 `--effect raw` plus `--gain` gives a plain, level-controlled clip. `--effect` changes loudness and tone indirectly (raw measured about 3x quieter than warm on the same text).
 Seed and gain were verified; `--temperature`, `--guidance` and `--effect` are passed through and untested for audible quality: audition before relying on them.
 
+## Inline markup (the app's own, passed through unchanged)
+
+`[pause 1500ms]` inside the text inserts real silence (verified: a 1500 ms marker added about 1.8 s). Use it for beats between sentences, e.g. `"Here is the problem. [pause 800ms] We fix it."`. Plain fillers like "um," or "..." are spoken as written. Other tags the app documents for longform (`[slow]..[/slow]`, `[fast]..[/fast]`, `[emphasis]..[/emphasis]`, `[spell]..[/spell]`) and `[laughter]` change the audio but are not yet confirmed by ear for `speak`; unknown tags such as `<hushed>` are not understood and are probably read aloud. For a whole-clip whisper use `--instruct whisper`.
+
 `manifest.json` has `total_seconds` and per segment `index, file, text, start, end, duration, engine, voice`: use `start`/`end` to place slides or cut video. Output is 24 kHz mono 16-bit WAV.
 
 ## Behavior to know
