@@ -62,7 +62,7 @@ Example: `speak "Here is the problem. [pause 500ms] [sigh] We fix it."`. Use rea
 - First call may start VoiceStudio.app (up to ~90 s, a model loads). A call takes roughly 5 s of compute per 1 s of audio on this Mac (17 s for a 4 s clip), so batch, do not call per word.
 - Long text is chunked by the app (800 chars per chunk, crossfaded). Use paragraph segments for video timing anyway.
 - Exit codes: 1 usage, 2 synth failed, 3 unknown voice, 4 no engine. A fallback to `say` prints `speak: using macOS say ... not the cloned voice` on stderr: check `engine` in `--json` if the voice matters.
-- Config: `~/.config/voicestudio/config.json` (personal, outside the repo; see `config.example.json`) `{"default_voice":"me","aliases":{"me":"<your profile>"}}`. Env `VOICESTUDIO_URL` overrides the API base.
+- Config: `~/.config/voicestudio/config.json` (personal, outside the repo; see `config.example.json`). An alias is a profile name or an object with settings: `{"me":{"voice":"<profile>","speed":1.3},"me-fast":{"voice":"<profile>","speed":2.0}}`; optional top-level `"defaults":{...}` applies to every voice. Settable keys: speed, gain, effect, instruct, seed, temperature, guidance, language. Precedence: command line flag > alias > defaults > built-in. So `--voice me` is his normal pace and `--voice me-fast` is his fast pace; run `speak voices` to see what each alias sets. Env `VOICESTUDIO_URL` overrides the API base.
 - Nothing is uploaded; there is no key or token. Reference clips live inside the app's data dir.
 
 ## Voices and consent

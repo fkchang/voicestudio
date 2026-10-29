@@ -1,7 +1,9 @@
 {
   "default_voice": "me",
+  "defaults": { "gain": -1 },
   "aliases": {
-    "me": "<name of your clone profile in VoiceStudio>",
+    "me":      { "voice": "<name of your clone profile in VoiceStudio>", "speed": 1.3 },
+    "me-fast": { "voice": "<same profile>", "speed": 2.0 },
     "narrator": "<any other profile name>"
   }
 }

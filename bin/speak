@@ -57,9 +57,33 @@ def profiles
   JSON.parse(http_get('/profiles').body)
 end
 
-# Resolve a voice name to a VoiceStudio profile via alias, exact name, then id.
+# config.json: {"default_voice":"me","defaults":{"speed":1.3},
+#               "aliases":{"me":"FKC3","me-fast":{"voice":"FKC3","speed":2.0}}}
+# An alias is a profile name or {voice, speed, gain, effect, instruct, seed, temperature, guidance}.
+# Precedence for settings: command line flag > alias > config "defaults" > built-in.
+SETTING_KEYS = { 'speed' => :speed, 'gain' => :gain, 'effect' => :effect, 'instruct' => :instruct,
+                 'seed' => :seed, 'guidance' => :guidance, 'language' => :language }.freeze
+
+def alias_entry(name)
+  entry = config.fetch('aliases', {}).find { |k, _| k.casecmp(name.to_s).zero? }&.last
+  entry.is_a?(String) ? { 'voice' => entry } : entry
+end
+
+# Returns [voice name, effective opts] with alias and config defaults folded under the CLI flags.
+def resolve_settings(voice, cli)
+  voice ||= config['default_voice'] || 'me'
+  entry = alias_entry(voice) || {}
+  eff = { speed: 1.0 }
+  [config.fetch('defaults', {}), entry].each do |src|
+    SETTING_KEYS.each { |k, sym| eff[sym] = src[k] if src.key?(k) }
+    eff[:pos_temp] = eff[:class_temp] = src['temperature'] if src.key?('temperature')
+  end
+  cli.each { |k, v| eff[k] = v unless v.nil? }
+  [entry['voice'] || voice, eff]
+end
+
+# Resolve a voice name to a VoiceStudio profile via exact name, then id, then prefix.
 def find_profile(name, list)
-  name = config.fetch('aliases', {}).fetch(name.downcase, name)
   list.find { |p| p['name'].casecmp(name).zero? } || list.find { |p| p['id'] == name } ||
     list.find { |p| p['name'].downcase.start_with?(name.downcase) }
 end
@@ -118,15 +142,15 @@ def via_say(text, voice, out)
 end
 
 # Returns [engine, voice name]. voice nil => config default_voice.
-def synth(text, voice, out, opts)
-  result = synth_raw(text, voice, out, opts)
+def synth(text, voice, out, cli_opts)
+  explicit = !voice.nil?
+  voice, opts = resolve_settings(voice, cli_opts)
+  result = synth_raw(text, voice, out, opts, explicit)
   apply_gain(out, opts[:gain]) if opts[:gain]
   result
 end
 
-def synth_raw(text, voice, out, opts)
-  explicit = !voice.nil?
-  voice ||= config['default_voice'] || 'me'
+def synth_raw(text, voice, out, opts, explicit)
   engine = opts[:engine]
   if engine != 'say' && ensure_app
     prof = find_profile(voice, profiles)
@@ -150,7 +174,7 @@ def split_segments(text)
   text.split(/\n\s*\n/).map { |s| s.gsub(/\s+/, ' ').strip }.reject(&:empty?)
 end
 
-opts = { speed: 1.0 }
+opts = {}
 play = false
 file = batch = out = outdir = voice = nil
 list = false
@@ -186,7 +210,10 @@ if ARGV.first == 'voices'
   if ensure_app
     cfg = config
     profiles.each { |p| puts "#{p['name']}\t#{p['kind']}\t(voicestudio profile)" }
-    cfg.fetch('aliases', {}).each { |a, t| puts "#{a}\t-> #{t}\t(alias)" }
+    cfg.fetch('aliases', {}).each do |a, t|
+      t = t.is_a?(Hash) ? t.map { |k, v| "#{k}=#{v}" }.join(' ') : t
+      puts "#{a}\t-> #{t}\t(alias)"
+    end
   end
   say_voices.each { |v| puts "#{v}\t(macOS say)" } if opts[:all]
   exit 0
