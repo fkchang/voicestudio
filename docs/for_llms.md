@@ -38,17 +38,22 @@ Seed and gain were verified; `--temperature`, `--guidance` and `--effect` are pa
 
 ## Inline markup (the app's own, passed through unchanged)
 
-Heard and confirmed by Forrest (2026-10-29), same text and seed:
+Source of truth: https://github.com/debpalash/VoiceStudio/blob/main/docs/expressive-speech.md (default engine = VoiceStudio/OmniVoice; the clone profiles use it). Tags an engine does not know are spoken aloud, so stick to this list:
 
-| Markup | Result |
-|---|---|
-| `[pause 800ms]` | Works: a real silent gap. A 1500 ms marker added about 1.8 s and sounded "quite long", so use 300 to 800 ms for natural beats. |
-| `[laughter]` | A non-verbal sound that comes out like a gasp, not a laugh. Usable for a breath or gasp; do not rely on it for laughing. |
-| `[slow]..[/slow]` (also `[fast]`, `[emphasis]`, `[spell]`) | NOT supported by `/generate`: the tag word is read aloud. Those tags belong to the app's longform/audiobook path. Do not use them. |
-| `<hushed>..</hushed>` or any other made-up tag | Not understood; the tag word is read aloud. |
-| `um,` / `...` in plain text | Spoken as written, which is usually what you want for fillers. |
+| Markup | Works on default engine | Notes |
+|---|---|---|
+| `[pause]`, `[pause 500ms]`, `[pause 1s]` | yes (all engines) | Real silence, 350 ms default, up to 10 s. Confirmed by ear: a 1500 ms marker sounded "quite long"; use 200 to 800 ms for natural beats. |
+| `[laughter]` | yes | Documented as laughter; confirmed by ear it came out as a gasp for the FKC 4 clone, so audition before using. |
+| `[sigh]` | yes | Documented, not yet auditioned. |
+| `[surprise-ah]` `[surprise-oh]` `[surprise-wa]` `[surprise-yo]` `[question-en]` `[question-ah]` `[question-oh]` `[question-ei]` `[question-yi]` `[confirmation-en]` `[dissatisfaction-hnn]` | yes | Reaction sounds, documented, not yet auditioned. |
+| `[[Respelling]]` | yes (all engines) | Pronunciation override, e.g. `[[Nuh-VAD-uh]]`. |
+| `[slow]..[/slow]`, `[fast]..[/fast]`, `[emphasis]..[/emphasis]`, `[spell]`, `[voice:NAME]` | NO | Audiobook and Stories features only; via `/generate` the tag word is read aloud (confirmed for `[slow]`). |
+| `[breath]`, `<strong>..</strong>`, `(speaking fast, out of breath)` prefix | NO | Other engines only (CosyVoice 3, VoxCPM2). |
+| `[whispers]`, `[excited]`, `[happy]`, `<hushed>` and any invented tag | NO | Not supported by any shipped engine; read aloud. |
 
-Example: `"Here is the problem. [pause 500ms] We fix it."`. For a whole-clip whisper use `--instruct whisper`; for slower or faster delivery use `--speed`. Per-phrase whisper or speed is not possible with a single call: split the text and call `speak` per phrase (use `--batch`).
+Whisper is not an inline tag: use `--instruct whisper` for the whole clip. Slower or faster: `--speed`. Per-phrase whisper or speed means splitting the text and calling `speak` per phrase (`--batch`). Fillers like "um," and "..." are spoken as written.
+
+Example: `speak "Here is the problem. [pause 500ms] [sigh] We fix it."`
 
 `manifest.json` has `total_seconds` and per segment `index, file, text, start, end, duration, engine, voice`: use `start`/`end` to place slides or cut video. Output is 24 kHz mono 16-bit WAV.
 
