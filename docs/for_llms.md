@@ -38,7 +38,17 @@ Seed and gain were verified; `--temperature`, `--guidance` and `--effect` are pa
 
 ## Inline markup (the app's own, passed through unchanged)
 
-`[pause 1500ms]` inside the text inserts real silence (verified: a 1500 ms marker added about 1.8 s). Use it for beats between sentences, e.g. `"Here is the problem. [pause 800ms] We fix it."`. Plain fillers like "um," or "..." are spoken as written. Other tags the app documents for longform (`[slow]..[/slow]`, `[fast]..[/fast]`, `[emphasis]..[/emphasis]`, `[spell]..[/spell]`) and `[laughter]` change the audio but are not yet confirmed by ear for `speak`; unknown tags such as `<hushed>` are not understood and are probably read aloud. For a whole-clip whisper use `--instruct whisper`.
+Heard and confirmed by Forrest (2026-10-29), same text and seed:
+
+| Markup | Result |
+|---|---|
+| `[pause 800ms]` | Works: a real silent gap. A 1500 ms marker added about 1.8 s and sounded "quite long", so use 300 to 800 ms for natural beats. |
+| `[laughter]` | A non-verbal sound that comes out like a gasp, not a laugh. Usable for a breath or gasp; do not rely on it for laughing. |
+| `[slow]..[/slow]` (also `[fast]`, `[emphasis]`, `[spell]`) | NOT supported by `/generate`: the tag word is read aloud. Those tags belong to the app's longform/audiobook path. Do not use them. |
+| `<hushed>..</hushed>` or any other made-up tag | Not understood; the tag word is read aloud. |
+| `um,` / `...` in plain text | Spoken as written, which is usually what you want for fillers. |
+
+Example: `"Here is the problem. [pause 500ms] We fix it."`. For a whole-clip whisper use `--instruct whisper`; for slower or faster delivery use `--speed`. Per-phrase whisper or speed is not possible with a single call: split the text and call `speak` per phrase (use `--batch`).
 
 `manifest.json` has `total_seconds` and per segment `index, file, text, start, end, duration, engine, voice`: use `start`/`end` to place slides or cut video. Output is 24 kHz mono 16-bit WAV.
 
