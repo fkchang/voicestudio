@@ -18,5 +18,7 @@ $SPEAK --batch script.txt --out-dir seg/       # blank-line paragraphs -> seg-NN
 
 Use `--voice me-fast` (or any alias shown by `speak voices`) for a preset voice+pace; aliases carry their own speed. Delivery (optional): `--speed 0.85`, `--effect raw|warm|bright|podcast|cinematic|broadcast`, `--seed N` (repeatable take), `--temperature N`, `--guidance N`, `--gain -3` (dB, never clips), `--instruct whisper` (voice attributes only, not free text). Details in the guide.
 
+Emphasis: wrap a word or short phrase in `[emph]..[/emph]` (deliberate) or `[strong]..[/strong]` (slower and louder); `speak` renders and joins the spans (needs ffmpeg for the stretch). `--tempo 0.85` slows any clip without changing pitch.
+
 Rules: ~5 s compute per 1 s audio, so batch; first call may launch the app (wait up to 90 s). Use `--json` and check `engine` (`voicestudio` = cloned voice, `say` = fallback, tell the user). Never record or upload voice samples; never clone anyone without their consent. Local only, no keys.
 For spoken notifications use `utts` instead (fast, play-only).

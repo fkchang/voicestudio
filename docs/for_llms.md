@@ -51,9 +51,29 @@ Source of truth: https://github.com/debpalash/VoiceStudio/blob/main/docs/express
 | `[breath]`, `<strong>..</strong>`, `(speaking fast, out of breath)` prefix | NO | Other engines only (CosyVoice 3, VoxCPM2). |
 | `[whispers]`, `[excited]`, `[happy]`, `<hushed>` and any invented tag | NO | Not supported by any shipped engine; read aloud. |
 
-Whisper is not an inline tag: use `--instruct whisper` for the whole clip. Slower or faster: `--speed`. Per-phrase whisper or speed means splitting the text and calling `speak` per phrase (`--batch`). Fillers like "um," and "..." are spoken as written.
+Whisper is not an inline tag: use `--instruct whisper` for the whole clip. For emphasis on part of a sentence use `[emph]..[/emph]` or `[strong]..[/strong]` (next section). Slower or faster: `--speed`. Per-phrase whisper or speed means splitting the text and calling `speak` per phrase (`--batch`). Fillers like "um," and "..." are spoken as written.
 
 Example: `speak "Here is the problem. [pause 500ms] [sigh] We fix it."`. Use reaction sounds sparingly, one at a time, at the start of a sentence or between sentences; a stack of them back to back is hard to listen to.
+
+## Emphasis spans (speak's own markup, not the app's)
+
+```bash
+$SPEAK "This is [emph]really[/emph] important, and [strong]this part[/strong] matters most." --out a.wav
+```
+
+`speak` splits the text on `[emph]..[/emph]` and `[strong]..[/strong]`, renders each span with its own settings, and joins them into one WAV. Plain text between spans keeps the voice's normal pace. Presets (from Forrest's tests, tweakable under `"emphasis"` in config.json):
+
+| Span | TTS speed | Gain | Extra slowdown (`--tempo`) |
+|---|---|---|---|
+| plain text | the voice's own (1.3 for `me`) | 0 dB | none |
+| `[emph]` (deliberate) | 1.0 | +2 dB | 0.85 |
+| `[strong]` | 0.85 | +4 dB | 0.621 |
+
+Why the extra slowdown: TTS speed alone is inconsistent on short phrases, so each span is also time-stretched after synthesis (`--tempo`, pitch-preserving, needs ffmpeg; `speak` finds it under /opt/homebrew/bin). Why leveling: each span is first normalized to a -6 dBFS peak and the relative gain applied after, so +4 dB gets its full +4 dB instead of being cut by the clip guard (which limited a plain `--gain 4` to about +2). Whole-clip `--gain` still applies after the join.
+
+Measured on "What is this?": 1.23 s plain, 1.62 s emph, 2.04 s strong; peaks -2 / -4 / -2 dBFS after leveling. Caveats: each span is a separate generation (more compute, and the sentence melody can break at a span boundary), so keep spans to a word or short phrase, and audition the result. In-sentence splicing is unverified by ear; the three-take "What is this?" case is Forrest's tested recipe. `speak --batch` honors the markup too.
+
+Standalone `--tempo 0.85` also works on any clip.
 
 `manifest.json` has `total_seconds` and per segment `index, file, text, start, end, duration, engine, voice`: use `start`/`end` to place slides or cut video. Output is 24 kHz mono 16-bit WAV.
 

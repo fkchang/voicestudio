@@ -1,0 +1,38 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Self-documenting emphasis demo: each take is announced, then spoken. Compares no markup, [emph], [strong],
+# and emphasis inside a longer sentence.
+# usage: emphasis-demo OUT_DIR [--voice NAME]   then: play-manifest OUT_DIR
+require 'json'
+require 'fileutils'
+
+dir = ARGV.fetch(0) { abort 'usage: emphasis-demo OUT_DIR [--voice NAME]' }
+voice = ARGV[1] == '--voice' ? ARGV[2] : nil
+speak = File.expand_path('../bin/speak', __dir__)
+FileUtils.mkdir_p(dir)
+
+sentence = 'This is really important, and this part matters most.'
+takes = [
+  ['Normal take.', 'What is this?'],
+  ['Emph, the deliberate take.', '[emph]What is this?[/emph]'],
+  ['Strong take.', '[strong]What is this?[/strong]'],
+  ['A sentence with no markup.', sentence],
+  ['The same sentence, emph on really, strong on this part.',
+   'This is [emph]really[/emph] important, and [strong]this part[/strong] matters most.']
+]
+segments = []
+render = lambda do |label, text|
+  file = File.expand_path(File.join(dir, format('%02d-%s.wav', segments.size + 1, label)))
+  cmd = [speak, text, '--seed', '7', '--out', file]
+  cmd += ['--voice', voice] if voice
+  system(*cmd, out: File::NULL) || abort("speak failed: #{text}")
+  segments << { 'index' => segments.size + 1, 'text' => text, 'file' => file }
+end
+takes.each_with_index do |(announce, text), i|
+  render.call("#{i + 1}a-announce", announce)
+  render.call("#{i + 1}b-take", text)
+  warn "rendered take #{i + 1}"
+end
+File.write(File.join(dir, 'manifest.json'), JSON.pretty_generate('segments' => segments))
+puts File.expand_path(dir)

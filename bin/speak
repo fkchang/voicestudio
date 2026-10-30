@@ -61,7 +61,7 @@ end
 #               "aliases":{"me":"FKC3","me-fast":{"voice":"FKC3","speed":2.0}}}
 # An alias is a profile name or {voice, speed, gain, effect, instruct, seed, temperature, guidance}.
 # Precedence for settings: command line flag > alias > config "defaults" > built-in.
-SETTING_KEYS = { 'speed' => :speed, 'gain' => :gain, 'effect' => :effect, 'instruct' => :instruct,
+SETTING_KEYS = { 'speed' => :speed, 'tempo' => :tempo, 'gain' => :gain, 'effect' => :effect, 'instruct' => :instruct,
                  'seed' => :seed, 'guidance' => :guidance, 'language' => :language }.freeze
 
 def alias_entry(name)
@@ -116,6 +116,58 @@ def apply_gain(path, db)
   File.binwrite(path, bin[0, start] + samples.map { |v| (v * factor).round.clamp(-32768, 32767) }.pack('s<*'))
 end
 
+# ffmpeg/sox live under Homebrew, which bare agent shells may not have on PATH.
+def resolve_bin(name)
+  found = `which #{name} 2>/dev/null`.strip
+  return found unless found.empty?
+  ['/opt/homebrew/bin', '/usr/local/bin'].map { |d| File.join(d, name) }.find { |f| File.executable?(f) }
+end
+
+# Pitch-preserving time stretch in place: tempo 0.85 = 15% slower. Needs ffmpeg.
+def apply_tempo(path, tempo)
+  return if tempo.nil? || (tempo - 1.0).abs < 0.001
+  ffmpeg = resolve_bin('ffmpeg') or die('--tempo needs ffmpeg (brew install ffmpeg)', 4)
+  filters = []
+  t = tempo
+  while t < 0.5 do filters << 'atempo=0.5'; t /= 0.5 end
+  filters << format('atempo=%.4f', t)
+  tmp = "#{path}.tempo.wav"
+  _o, e, st = Open3.capture3(ffmpeg, '-y', '-loglevel', 'error', '-i', path, '-filter:a', filters.join(','),
+                             '-ar', '24000', '-ac', '1', '-c:a', 'pcm_s16le', tmp)
+  die("ffmpeg tempo failed: #{e.strip[0, 200]}", 2) unless st.success?
+  File.rename(tmp, path)
+end
+
+def read_wav(path)
+  bin = File.binread(path)
+  at = bin.index('data') or die("no data chunk in #{path}", 2)
+  [bin[24, 4].unpack('V').first, bin[(at + 8)..-1].unpack('s<*')]
+end
+
+def write_wav(path, samples, rate)
+  data = samples.pack('s<*')
+  hdr = ['RIFF', 36 + data.bytesize, 'WAVE', 'fmt ', 16, 1, 1, rate, rate * 2, 2, 16, 'data', data.bytesize]
+  File.binwrite(path, hdr.pack('a4Va4a4VvvVVvva4V') + data)
+end
+
+# Scale a clip so its peak sits at `dbfs` (e.g. -6), leaving headroom for relative gain afterwards.
+def normalize_peak(samples, dbfs)
+  peak = samples.map(&:abs).max.to_f
+  return samples if peak.zero?
+  f = (32767 * 10**(dbfs / 20.0)) / peak
+  samples.map { |v| (v * f).round.clamp(-32768, 32767) }
+end
+
+# Span presets for [emph]..[/emph] and [strong]..[/strong]; override under "emphasis" in config.json.
+# Defaults come from Forrest's A/B/C takes: deliberate = speed 1.0, +2 dB, tempo 0.85;
+# strong = speed 0.85, +4 dB, tempo 0.621.
+EMPHASIS_DEFAULTS = {
+  'emph'   => { 'speed' => 1.0,  'gain' => 2.0, 'tempo' => 0.85 },
+  'strong' => { 'speed' => 0.85, 'gain' => 4.0, 'tempo' => 0.621 }
+}.freeze
+MARK_RE = %r{\[(emph|strong)\](.*?)\[/\1\]}m
+BASE_PEAK_DBFS = -6.0 # every span is leveled here first, so +4 dB lands at -2 dBFS, not clipped
+
 def via_voicestudio(text, profile, out, opts)
   cmd = ['curl', '-sS', '--fail-with-body', '-m', '900', '-X', 'POST', "#{BASE}/generate",
          '-F', "text=#{text}", '-F', "profile_id=#{profile['id']}", '-F', "speed=#{opts[:speed]}", '-o', out]
@@ -145,9 +197,53 @@ end
 def synth(text, voice, out, cli_opts)
   explicit = !voice.nil?
   voice, opts = resolve_settings(voice, cli_opts)
+  return synth_marked(text, voice, out, opts, explicit) if text =~ MARK_RE
   result = synth_raw(text, voice, out, opts, explicit)
+  apply_tempo(out, opts[:tempo])
   apply_gain(out, opts[:gain]) if opts[:gain]
   result
+end
+
+# Text with [emph]/[strong] spans: render each span with its own settings, level all spans to
+# BASE_PEAK_DBFS, apply each span's relative gain, join into one WAV, then the clip-wide --gain.
+def synth_marked(text, voice, out, opts, explicit)
+  presets = EMPHASIS_DEFAULTS.merge(config.fetch('emphasis', {})) { |_k, a, b| a.merge(b) }
+  pieces = []
+  pos = 0
+  text.scan(MARK_RE) do
+    m = Regexp.last_match
+    pieces << [text[pos...m.begin(0)], nil]
+    pieces << [m[2], m[1]]
+    pos = m.end(0)
+  end
+  pieces << [text[pos..-1], nil]
+  pieces.reject! { |t, _| t.strip.empty? }
+  engine = vname = nil
+  rate = 24_000
+  joined = []
+  Dir.mktmpdir do |d|
+    pieces.each_with_index do |(t, kind), i|
+      seg = opts.dup
+      seg.delete(:gain)
+      seg.delete(:tempo)
+      rel = 0.0
+      if kind
+        pr = presets.fetch(kind)
+        seg[:speed] = pr['speed'] if pr['speed']
+        seg[:tempo] = pr['tempo']
+        rel = pr['gain'].to_f
+      end
+      f = File.join(d, format('%02d.wav', i))
+      engine, vname = synth_raw(t.strip, voice, f, seg, explicit)
+      apply_tempo(f, seg[:tempo])
+      rate, samples = read_wav(f)
+      samples = normalize_peak(samples, BASE_PEAK_DBFS + rel)
+      joined.concat(samples)
+    end
+  end
+  write_wav(out, joined, rate)
+  apply_gain(out, opts[:gain]) if opts[:gain]
+  [engine, vname]
 end
 
 def synth_raw(text, voice, out, opts, explicit)
@@ -184,6 +280,7 @@ OptionParser.new do |o|
            speak --file script.txt [--out FILE.wav]
            speak --batch script.txt --out-dir DIR      (paragraph = segment; writes DIR/manifest.json)
            speak voices                                 (list voices, one per line)
+    Emphasis: wrap text in [emph]..[/emph] or [strong]..[/strong] (slower, louder; joined into one clip).
     Default voice: config default_voice (alias 'me'). Exit codes: 1 usage, 2 synth failed, 3 unknown voice, 4 no engine.
   B
   o.on('--voice NAME', 'profile name, id, alias or name prefix (see: speak voices)') { |v| voice = v }
@@ -199,6 +296,7 @@ OptionParser.new do |o|
   o.on('--seed N', Integer, 'repeat the same delivery for the same text') { |v| opts[:seed] = v }
   o.on('--temperature N', Float, 'delivery variation (sets position and class temperature)') { |v| opts[:pos_temp] = opts[:class_temp] = v }
   o.on('--guidance N', Float, 'how strongly the clone voice is steered, default 2.0') { |v| opts[:guidance] = v }
+  o.on('--tempo X', Float, 'pitch-preserving slowdown after synthesis: 0.85 = 15% slower (needs ffmpeg)') { |v| opts[:tempo] = v }
   o.on('--gain DB', Float, 'volume change in dB, e.g. -3 or +6 (limited so it cannot clip)') { |v| opts[:gain] = v }
   o.on('--engine E', %w[voicestudio say], 'force voicestudio or say (default: voicestudio, falls back to say)') { |v| opts[:engine] = v }
   o.on('--all', 'with voices: also list macOS say voices') { opts[:all] = true }
